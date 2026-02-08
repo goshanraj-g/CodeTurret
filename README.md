@@ -49,6 +49,7 @@ Snowflake serves as the **data backbone** for CodeBouncer:
 | `REPOSITORY_CONFIG` | Registered repos and their metadata |
 | `SCAN_HISTORY` | Audit log of all scans with status/timestamps |
 | `SCAN_RESULTS` | Individual vulnerability findings per scan |
+| `FINDING_EMBEDDINGS` | Vector embeddings for semantic search |
 
 ### 2. Cortex LLM Integration
 The `/ask` endpoint uses **Snowflake Cortex** (`llama3.1-8b`) to answer natural language questions:
@@ -60,9 +61,34 @@ Cortex: "Based on 47 findings across 8 scans, SQL Injection (34%) and
         highest concentration of critical issues."
 ```
 
-### 3. Analytics Views
+### 3. Cortex Search + Vector Embeddings
+Findings are embedded using **Cortex Embed** and stored as vectors, enabling:
+- **Semantic search**: "Find vulnerabilities similar to this CVE"
+- **Deduplication**: Detect duplicate findings across repos
+- **Clustering**: Group related issues for batch remediation
+
+### 4. Time Travel for Scan Comparison
+Snowflake's **Time Travel** enables:
+- Compare findings between any two scans
+- Rollback to see security posture at any point in time
+- Track vulnerability regression over releases
+
+```sql
+-- Compare current findings vs. 7 days ago
+SELECT * FROM SCAN_RESULTS AT(OFFSET => -60*60*24*7)
+EXCEPT SELECT * FROM SCAN_RESULTS;
+```
+
+### 5. Snowpark Processing
+Heavy analysis runs directly in Snowflake via **Snowpark Python**:
+- Batch vulnerability pattern matching
+- Cross-repo correlation analysis
+- Parallel file risk scoring
+
+### 6. Analytics Views
 - `SCAN_HEATMAP` — Aggregated severity counts by file path
-- Enables trend analysis and hotspot identification over time
+- `VULN_TRENDS` — Time-series trend analysis
+- `REPO_RISK_SCORES` — Overall security health per repository
 
 
 ## Tech Stack
