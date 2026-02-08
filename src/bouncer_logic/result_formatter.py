@@ -14,6 +14,7 @@ def format_finding(
     raw_finding: dict,
     model_used: str,
     raw_response: dict,
+    blame_info: dict = None,
 ) -> dict:
     """Convert a raw AI finding into a row matching SCAN_RESULTS."""
     # Truncate fields to fit Snowflake column limits
@@ -35,7 +36,9 @@ def format_finding(
         "CODE_SNIPPET": truncate(raw_finding.get("code_snippet", ""), 4000),
         "MODEL_USED": model_used,
         "CONFIDENCE": raw_finding.get("confidence", 0.0),
-        # Skip raw_response to avoid JSON size issues
+        "COMMIT_HASH": blame_info["hash"] if blame_info else None,
+        "COMMIT_AUTHOR": blame_info["author"] if blame_info else None,
+        "COMMIT_DATE": blame_info["date"] if blame_info else None,
     }
 
 
@@ -50,8 +53,9 @@ def persist_findings(conn, findings: List[dict]) -> int:
             f"""INSERT INTO {config.TABLE_SCAN_RESULTS}
                 (FINDING_ID, SCAN_ID, REPO_ID, FILE_PATH, LINE_NUMBER,
                  SEVERITY, VULN_TYPE, DESCRIPTION, FIX_SUGGESTION,
-                 CODE_SNIPPET, MODEL_USED, CONFIDENCE)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                 CODE_SNIPPET, MODEL_USED, CONFIDENCE,
+                 COMMIT_HASH, COMMIT_AUTHOR, COMMIT_DATE)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             [
                 (
                     f["FINDING_ID"], f["SCAN_ID"], f["REPO_ID"],
@@ -59,6 +63,7 @@ def persist_findings(conn, findings: List[dict]) -> int:
                     f["SEVERITY"], f["VULN_TYPE"], f["DESCRIPTION"],
                     f["FIX_SUGGESTION"], f["CODE_SNIPPET"],
                     f["MODEL_USED"], f["CONFIDENCE"],
+                    f["COMMIT_HASH"], f["COMMIT_AUTHOR"], f["COMMIT_DATE"],
                 )
                 for f in findings
             ],

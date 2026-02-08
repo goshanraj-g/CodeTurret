@@ -250,6 +250,57 @@ class TestRunSecurityScan:
     @patch("bouncer_logic.scanner.cortex_client")
     @patch("bouncer_logic.scanner.gemini_client")
     @patch("bouncer_logic.scanner.github_client")
+    def test_blame_called_for_findings_with_line_number(
+        self, mock_gh, mock_gc, mock_cc, mock_rf, mock_ra, mock_gi, mock_ce, mock_get_conn, mock_conn
+    ):
+        mock_get_conn.return_value = mock_conn
+        mock_gh.clone_repo.return_value = "/tmp/repo"
+        mock_gh.list_repo_files.return_value = [
+            {"path": "a.py", "full_path": "/tmp/repo/a.py"},
+        ]
+        mock_gh.read_file_content.return_value = "eval(input())"
+        mock_gi.get_hot_files.return_value = {}
+        mock_gi.get_security_commits.return_value = {}
+        mock_gi.get_repo_context.return_value = ""
+        mock_gi.blame_line.return_value = {
+            "hash": "abc1234" * 5 + "abcde",
+            "author": "Dev",
+            "date": "2025-06-01",
+        }
+        mock_ce.extract_security_snippets.return_value = []
+        mock_ce.build_focused_content.return_value = ""
+        mock_ra.prioritize_files.side_effect = _passthrough_prioritize
+        mock_gc.triage_with_flash.return_value = {
+            "findings": [
+                {"severity": "HIGH", "vuln_type": "RCE", "description": "eval",
+                 "confidence": 0.9, "line_number": 1}
+            ],
+            "file_risk_score": 0.9,
+            "summary": "RCE found",
+        }
+        mock_gc.deep_analyze_with_pro.return_value = None
+        mock_rf.format_finding.return_value = {"FINDING_ID": "test"}
+        mock_rf.persist_findings.return_value = 1
+
+        scanner.run_security_scan("https://github.com/test/repo")
+
+        mock_gi.blame_line.assert_called_once_with("/tmp/repo", "a.py", 1)
+        # Verify blame_info was passed to format_finding
+        call_kwargs = mock_rf.format_finding.call_args
+        assert call_kwargs[1]["blame_info"] == {
+            "hash": "abc1234" * 5 + "abcde",
+            "author": "Dev",
+            "date": "2025-06-01",
+        }
+
+    @patch("bouncer_logic.scanner.config.get_snowflake_connection")
+    @patch("bouncer_logic.scanner.code_extractor")
+    @patch("bouncer_logic.scanner.git_intel")
+    @patch("bouncer_logic.scanner.risk_assessor")
+    @patch("bouncer_logic.scanner.result_formatter")
+    @patch("bouncer_logic.scanner.cortex_client")
+    @patch("bouncer_logic.scanner.gemini_client")
+    @patch("bouncer_logic.scanner.github_client")
     def test_cortex_insights_called_when_findings_exist(
         self, mock_gh, mock_gc, mock_cc, mock_rf, mock_ra, mock_gi, mock_ce, mock_get_conn, mock_conn
     ):

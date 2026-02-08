@@ -64,6 +64,62 @@ def get_security_commits(repo_dir: str, max_count: int = 50) -> Dict[str, List[s
     return dict(mapping)
 
 
+def blame_line(
+    repo_dir: str, file_path: str, line_number: int
+) -> Optional[Dict[str, str]]:
+    """Get the commit that last modified a specific line via git blame.
+
+    Returns ``{"hash": "abc123f", "author": "Name", "date": "2025-12-01"}``
+    or ``None`` if blame fails (file missing, line out of range, shallow clone).
+    """
+    if not line_number or line_number < 1:
+        return None
+
+    try:
+        result = subprocess.run(
+            [
+                "git", "blame", "-L", f"{line_number},{line_number}",
+                "--porcelain", "--", file_path,
+            ],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+
+        lines = result.stdout.splitlines()
+        if not lines:
+            return None
+
+        # First line: <hash> <orig_line> <final_line> <num_lines>
+        commit_hash = lines[0].split()[0]
+
+        author = ""
+        author_time = ""
+        for line in lines[1:]:
+            if line.startswith("author "):
+                author = line[len("author "):]
+            elif line.startswith("author-time "):
+                author_time = line[len("author-time "):]
+
+        # Convert unix timestamp to ISO date
+        date_str = ""
+        if author_time:
+            from datetime import datetime, timezone
+            ts = int(author_time)
+            date_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+        return {
+            "hash": commit_hash,
+            "author": author,
+            "date": date_str,
+        }
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+
+
 def get_repo_context(repo_dir: str) -> str:
     """Build a short project description from README and package metadata.
 

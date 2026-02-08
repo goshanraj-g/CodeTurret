@@ -21,7 +21,7 @@ export default function Home() {
           animate={{ opacity: 1, y: 0 }}
           className="text-5xl font-bold tracking-tight text-white md:text-7xl"
         >
-          Repo<span className="text-green-500">Sentinel</span>
+          Code<span className="text-green-500">Bouncer</span>
         </motion.h1>
         <motion.p
           initial={{ opacity: 0, y: 20 }}
@@ -29,7 +29,7 @@ export default function Home() {
           transition={{ delay: 0.1 }}
           className="max-w-xl text-lg text-muted-foreground"
         >
-          Next-generation AI security auditor. Autonomous vulnerability detection and remediation for your codebase.
+          Next-generation AI security auditor; get autonomous vulnerability detection and remediation for your codebase
         </motion.p>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -86,7 +86,7 @@ export default function Home() {
               <div className="flex items-center gap-4">
                 <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
                 <div>
-                  <div className="font-mono text-sm text-white">goshanraj-g/RepoSentinel</div>
+                  <div className="font-mono text-sm text-white">goshanraj-g/CodeBouncer</div>
                   <div className="text-xs text-muted-foreground">Scan #8F2A • 2 mins ago</div>
                 </div>
               </div>

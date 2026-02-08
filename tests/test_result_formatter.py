@@ -1,6 +1,5 @@
 """Tests for bouncer_logic.result_formatter."""
 
-import json
 from unittest.mock import MagicMock, call
 
 from bouncer_logic import result_formatter
@@ -23,7 +22,7 @@ class TestFormatFinding:
         required_keys = {
             "FINDING_ID", "SCAN_ID", "REPO_ID", "FILE_PATH",
             "SEVERITY", "VULN_TYPE", "DESCRIPTION", "MODEL_USED",
-            "CONFIDENCE", "RAW_RESPONSE",
+            "CONFIDENCE", "COMMIT_HASH", "COMMIT_AUTHOR", "COMMIT_DATE",
         }
         assert required_keys.issubset(result.keys())
 
@@ -39,12 +38,20 @@ class TestFormatFinding:
         assert result["FIX_SUGGESTION"] == ""
         assert result["CONFIDENCE"] == 0.0
 
-    def test_raw_response_is_json_string(self):
+    def test_blame_info_included_when_provided(self):
         raw = {"severity": "LOW", "vuln_type": "t", "description": "d"}
-        response = {"findings": [raw]}
-        result = result_formatter.format_finding("s", 1, "f", raw, "m", response)
-        parsed = json.loads(result["RAW_RESPONSE"])
-        assert "findings" in parsed
+        blame = {"hash": "abc123", "author": "Dev", "date": "2025-01-01"}
+        result = result_formatter.format_finding("s", 1, "f", raw, "m", {}, blame_info=blame)
+        assert result["COMMIT_HASH"] == "abc123"
+        assert result["COMMIT_AUTHOR"] == "Dev"
+        assert result["COMMIT_DATE"] == "2025-01-01"
+
+    def test_blame_info_none_when_not_provided(self):
+        raw = {"severity": "LOW", "vuln_type": "t", "description": "d"}
+        result = result_formatter.format_finding("s", 1, "f", raw, "m", {})
+        assert result["COMMIT_HASH"] is None
+        assert result["COMMIT_AUTHOR"] is None
+        assert result["COMMIT_DATE"] is None
 
 
 class TestPersistFindings:
@@ -60,7 +67,8 @@ class TestPersistFindings:
                 "SEVERITY": "HIGH", "VULN_TYPE": "SQLi",
                 "DESCRIPTION": "d", "FIX_SUGGESTION": "",
                 "CODE_SNIPPET": "", "MODEL_USED": "m",
-                "CONFIDENCE": 0.9, "RAW_RESPONSE": "{}",
+                "CONFIDENCE": 0.9,
+                "COMMIT_HASH": "abc123", "COMMIT_AUTHOR": "Dev", "COMMIT_DATE": "2025-01-01",
             },
             {
                 "FINDING_ID": "b", "SCAN_ID": "s", "REPO_ID": 1,
@@ -68,7 +76,8 @@ class TestPersistFindings:
                 "SEVERITY": "LOW", "VULN_TYPE": "Info",
                 "DESCRIPTION": "d", "FIX_SUGGESTION": "",
                 "CODE_SNIPPET": "", "MODEL_USED": "m",
-                "CONFIDENCE": 0.5, "RAW_RESPONSE": "{}",
+                "CONFIDENCE": 0.5,
+                "COMMIT_HASH": None, "COMMIT_AUTHOR": None, "COMMIT_DATE": None,
             },
         ]
         count = result_formatter.persist_findings(mock_conn, findings)

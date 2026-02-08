@@ -1,4 +1,4 @@
-# RepoSentinel Frontend
+# CodeBouncer Frontend
 
 Next.js frontend with a "Dev Tool" aesthetic for the CodeBouncer security scanner.
 

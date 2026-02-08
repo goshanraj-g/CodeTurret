@@ -216,7 +216,7 @@ export default function AskPage() {
                                 <div className="mb-3">
                                     <input
                                         type="text"
-                                        placeholder="Repository name (e.g. RepoSentinel)"
+                                        placeholder="Repository name (e.g. CodeBouncer)"
                                         value={repoName}
                                         onChange={(e) => setRepoName(e.target.value)}
                                         className="w-full rounded-xl border border-white/10 bg-black/60 px-4 py-3 font-mono text-sm text-white placeholder-white/30 focus:border-green-500/50 focus:outline-none focus:ring-2 focus:ring-green-500/20 transition-all"

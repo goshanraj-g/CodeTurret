@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { AlertTriangle, CheckCircle, Code, Bug, ArrowLeft } from "lucide-react";
+import { AlertTriangle, CheckCircle, Code, Bug, ArrowLeft, GitCommit } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,9 @@ interface Finding {
     description: string;
     code_snippet: string;
     fix_suggestion: string;
+    commit_hash: string | null;
+    commit_author: string | null;
+    commit_date: string | null;
 }
 
 export default function FindingDetailsPage() {
@@ -95,6 +98,20 @@ export default function FindingDetailsPage() {
                                         <div className="mt-1 font-mono text-xs text-muted-foreground">
                                             {finding.file_path}:{finding.line_number}
                                         </div>
+                                        {finding.commit_author && (
+                                            <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                <GitCommit className="h-3 w-3" />
+                                                <span>{finding.commit_author}</span>
+                                                {finding.commit_date && (
+                                                    <span>on {finding.commit_date}</span>
+                                                )}
+                                                {finding.commit_hash && (
+                                                    <span className="font-mono text-white/40">
+                                                        {finding.commit_hash.slice(0, 7)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>

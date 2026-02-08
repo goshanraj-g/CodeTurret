@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "RepoSentinel | CodeBouncer",
+  title: "CodeBouncer",
   description: "AI-Powered Security Auditor",
 };
 

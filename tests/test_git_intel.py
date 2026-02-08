@@ -85,6 +85,34 @@ class TestGetSecurityCommits:
         assert "app.py" not in sec
 
 
+class TestBlameLine:
+    def test_returns_blame_info(self, git_repo):
+        # app.py line 1 was last modified in commit 4 ("refactor app")
+        result = git_intel.blame_line(str(git_repo), "app.py", 1)
+        assert result is not None
+        assert "hash" in result
+        assert len(result["hash"]) == 40
+        assert result["author"] == "Test"
+        assert result["date"]  # non-empty date string
+
+    def test_returns_none_for_missing_file(self, git_repo):
+        result = git_intel.blame_line(str(git_repo), "nonexistent.py", 1)
+        assert result is None
+
+    def test_returns_none_for_invalid_line(self, git_repo):
+        result = git_intel.blame_line(str(git_repo), "app.py", 9999)
+        assert result is None
+
+    def test_returns_none_for_zero_line(self, git_repo):
+        result = git_intel.blame_line(str(git_repo), "app.py", 0)
+        assert result is None
+
+    def test_returns_none_for_non_git_dir(self, tmp_path):
+        (tmp_path / "file.py").write_text("x = 1")
+        result = git_intel.blame_line(str(tmp_path), "file.py", 1)
+        assert result is None
+
+
 class TestGetRepoContext:
     def test_reads_readme(self, tmp_path):
         (tmp_path / "README.md").write_text("# My Project\n\nA cool web app.")

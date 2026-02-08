@@ -145,6 +145,13 @@ def run_security_scan(
                     )
 
             for raw in findings_for_file:
+                # Enrich with git blame data
+                blame_info = None
+                if raw.get("line_number") and repo_dir:
+                    blame_info = git_intel.blame_line(
+                        repo_dir, path, raw["line_number"]
+                    )
+
                 formatted = result_formatter.format_finding(
                     scan_id,
                     repo_id,
@@ -152,6 +159,7 @@ def run_security_scan(
                     raw,
                     model_used,
                     triage_result if model_used == config.MODEL_FLASH else deep_result,
+                    blame_info=blame_info,
                 )
                 all_findings.append(formatted)
 

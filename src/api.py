@@ -1,4 +1,4 @@
-"""FastAPI backend for RepoSentinel (CodeBouncer)."""
+"""FastAPI backend for CodeBouncer (CodeBouncer)."""
 
 import logging
 import os
@@ -22,7 +22,7 @@ from bouncer_logic import config, scanner, repo_chat
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="RepoSentinel API", version="1.0.0")
+app = FastAPI(title="CodeBouncer API", version="1.0.0")
 
 # CORS (Allow frontend to connect)
 app.add_middleware(
@@ -52,7 +52,7 @@ def get_snowflake_conn():
 
 @app.get("/")
 def health_check():
-    return {"status": "ok", "service": "RepoSentinel API"}
+    return {"status": "ok", "service": "CodeBouncer API"}
 
 @app.post("/scan")
 def trigger_scan(request: ScanRequest):
@@ -130,7 +130,8 @@ def get_scan_findings(scan_id: str):
         cur.execute(
             """SELECT FINDING_ID, SCAN_ID, FILE_PATH, LINE_NUMBER,
                       SEVERITY, VULN_TYPE, DESCRIPTION, FIX_SUGGESTION,
-                      CODE_SNIPPET, MODEL_USED, CONFIDENCE
+                      CODE_SNIPPET, MODEL_USED, CONFIDENCE,
+                      COMMIT_HASH, COMMIT_AUTHOR, COMMIT_DATE
                FROM CODEBOUNCER.CORE.SCAN_RESULTS
                WHERE SCAN_ID = %s
                ORDER BY

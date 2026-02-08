@@ -80,7 +80,8 @@ def _get_repo_context(conn, repo_name: str) -> Optional[dict]:
         # Get all findings for this scan
         cur.execute(
             """SELECT SEVERITY, VULN_TYPE, DESCRIPTION, FILE_PATH,
-                      FIX_SUGGESTION, CONFIDENCE, LINE_NUMBER
+                      FIX_SUGGESTION, CONFIDENCE, LINE_NUMBER,
+                      COMMIT_HASH, COMMIT_AUTHOR, COMMIT_DATE
                FROM CODEBOUNCER.CORE.SCAN_RESULTS
                WHERE SCAN_ID = %s
                ORDER BY
@@ -132,6 +133,13 @@ def _build_chat_prompt(context: dict, repo_name: str, question: str) -> str:
             f"{f['FILE_PATH']}{line_info} — {f['DESCRIPTION']} "
             f"(confidence: {f['CONFIDENCE']})"
         )
+        if f.get("COMMIT_AUTHOR"):
+            commit_info = f"   Committed by: {f['COMMIT_AUTHOR']}"
+            if f.get("COMMIT_DATE"):
+                commit_info += f" on {f['COMMIT_DATE']}"
+            if f.get("COMMIT_HASH"):
+                commit_info += f" ({f['COMMIT_HASH'][:7]})"
+            entry += f"\n{commit_info}"
         if f.get("FIX_SUGGESTION"):
             entry += f"\n   Fix: {f['FIX_SUGGESTION']}"
         findings_lines.append(entry)
