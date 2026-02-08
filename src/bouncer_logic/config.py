@@ -10,7 +10,7 @@ SCANNABLE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx"}
 
 # Gemini models (called via Google AI API)
 MODEL_FLASH = "gemini-2.0-flash"
-MODEL_PRO = "gemini-2.5-pro-preview-05-06"
+MODEL_PRO = "gemini-2.5-pro"
 
 # Snowflake Cortex model (for post-scan analytics + repo Q&A)
 CORTEX_ANALYTICS_MODEL = "llama3.1-8b"
@@ -44,6 +44,7 @@ MAX_SCAN_FILES = 25
 GEMINI_TIMEOUT_SECONDS = 60
 GEMINI_MAX_RETRIES = 2
 GEMINI_RETRY_DELAY_SECONDS = 2
+GEMINI_RATE_LIMIT_DELAY = 7  # seconds between API calls (free tier: 10 req/min)
 
 # Fully-qualified table names
 TABLE_SCAN_RESULTS = "CODEBOUNCER.CORE.SCAN_RESULTS"

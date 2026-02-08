@@ -166,12 +166,24 @@ def _call_cortex(conn, prompt: str) -> str:
             raise RepoChatError("Empty response from Cortex")
 
         raw = result[0]
-        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        logger.debug("Cortex raw response type=%s len=%s", type(raw).__name__, len(str(raw)) if raw else 0)
+        if not raw:
+            raise RepoChatError("Empty response from Cortex")
+
+        # Cortex may return a JSON dict with choices, or a plain string
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                # Already a plain text answer
+                return raw.strip()
+        else:
+            parsed = raw
 
         if isinstance(parsed, dict) and "choices" in parsed:
             msg = parsed["choices"][0]["messages"]
-            return msg if isinstance(msg, str) else json.dumps(msg)
-        return str(parsed)
+            return msg.strip() if isinstance(msg, str) else json.dumps(msg)
+        return str(parsed).strip()
 
     except RepoChatError:
         raise

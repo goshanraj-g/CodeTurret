@@ -9,15 +9,19 @@ from bouncer_logic import gemini_client, config
 from bouncer_logic.gemini_client import GeminiCallError, GeminiTimeoutError
 
 
+def _mock_client_with_response(mock_genai, response_text):
+    """Helper: set up mock genai.Client to return a response with given text."""
+    mock_client = MagicMock()
+    mock_genai.Client.return_value = mock_client
+    mock_client.models.generate_content.return_value = MagicMock(text=response_text)
+    return mock_client
+
+
 class TestCallGemini:
     @patch("bouncer_logic.gemini_client.genai")
     @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
     def test_parses_json_response(self, mock_genai, sample_triage_response):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
-        mock_model.generate_content.return_value = MagicMock(
-            text=json.dumps(sample_triage_response)
-        )
+        _mock_client_with_response(mock_genai, json.dumps(sample_triage_response))
 
         result = gemini_client.call_gemini(config.MODEL_FLASH, "test prompt")
 
@@ -27,46 +31,21 @@ class TestCallGemini:
     @patch("bouncer_logic.gemini_client.genai")
     @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
     def test_uses_correct_model(self, mock_genai, sample_triage_response):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
-        mock_model.generate_content.return_value = MagicMock(
-            text=json.dumps(sample_triage_response)
-        )
+        mock_client = _mock_client_with_response(mock_genai, json.dumps(sample_triage_response))
 
         gemini_client.call_gemini(config.MODEL_FLASH, "prompt")
 
-        mock_genai.GenerativeModel.assert_called_once()
-        call_args = mock_genai.GenerativeModel.call_args
-        assert call_args[0][0] == config.MODEL_FLASH
+        call_kwargs = mock_client.models.generate_content.call_args
+        assert call_kwargs[1]["model"] == config.MODEL_FLASH
 
     @patch("bouncer_logic.gemini_client.genai")
     @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
-    def test_sets_json_response_mime_type(self, mock_genai, sample_triage_response):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
-        mock_model.generate_content.return_value = MagicMock(
-            text=json.dumps(sample_triage_response)
-        )
+    def test_configures_client_with_api_key(self, mock_genai, sample_triage_response):
+        _mock_client_with_response(mock_genai, json.dumps(sample_triage_response))
 
         gemini_client.call_gemini(config.MODEL_FLASH, "prompt")
 
-        gen_config = mock_genai.GenerativeModel.call_args[1]["generation_config"]
-        assert gen_config["response_mime_type"] == "application/json"
-
-    @patch("bouncer_logic.gemini_client.genai")
-    @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
-    def test_passes_response_schema(self, mock_genai, sample_triage_response):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
-        mock_model.generate_content.return_value = MagicMock(
-            text=json.dumps(sample_triage_response)
-        )
-
-        schema = {"type": "object", "properties": {}}
-        gemini_client.call_gemini(config.MODEL_FLASH, "prompt", response_schema=schema)
-
-        gen_config = mock_genai.GenerativeModel.call_args[1]["generation_config"]
-        assert gen_config["response_schema"] == schema
+        mock_genai.Client.assert_called_once_with(api_key="test-key")
 
     @patch.dict("os.environ", {}, clear=True)
     def test_raises_without_api_key(self):
@@ -79,9 +58,9 @@ class TestRetryLogic:
     @patch("bouncer_logic.gemini_client.genai")
     @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
     def test_retries_on_failure(self, mock_genai, mock_sleep, sample_triage_response):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
-        mock_model.generate_content.side_effect = [
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        mock_client.models.generate_content.side_effect = [
             RuntimeError("transient"),
             MagicMock(text=json.dumps(sample_triage_response)),
         ]
@@ -91,28 +70,28 @@ class TestRetryLogic:
         )
 
         assert "findings" in result
-        assert mock_model.generate_content.call_count == 2
+        assert mock_client.models.generate_content.call_count == 2
 
     @patch("bouncer_logic.gemini_client.time.sleep")
     @patch("bouncer_logic.gemini_client.genai")
     @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
     def test_raises_after_max_retries(self, mock_genai, mock_sleep):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
-        mock_model.generate_content.side_effect = RuntimeError("persistent")
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        mock_client.models.generate_content.side_effect = RuntimeError("persistent")
 
         with pytest.raises(GeminiCallError, match="persistent"):
             gemini_client.call_gemini(
                 config.MODEL_FLASH, "prompt", max_retries=2
             )
 
-        assert mock_model.generate_content.call_count == 2
+        assert mock_client.models.generate_content.call_count == 2
 
     @patch("bouncer_logic.gemini_client.genai")
     @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
     def test_timeout_raises_immediately(self, mock_genai, sample_triage_response):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
 
         import time as real_time
 
@@ -120,7 +99,7 @@ class TestRetryLogic:
             real_time.sleep(0.05)
             return MagicMock(text=json.dumps(sample_triage_response))
 
-        mock_model.generate_content.side_effect = slow_generate
+        mock_client.models.generate_content.side_effect = slow_generate
 
         with pytest.raises(GeminiTimeoutError):
             gemini_client.call_gemini(

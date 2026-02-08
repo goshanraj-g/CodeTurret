@@ -5,6 +5,7 @@ Storage & Analytics: Snowflake (persist findings + Cortex post-scan insights)
 """
 
 import logging
+import time
 import uuid
 from typing import Optional
 
@@ -95,9 +96,13 @@ def run_security_scan(
 
         all_findings: list[dict] = []
 
-        for file_info in files:
+        for i, file_info in enumerate(files):
             path = file_info["path"]
             full_content = contents[path]
+
+            # Throttle to stay within API rate limits
+            if i > 0:
+                time.sleep(config.GEMINI_RATE_LIMIT_DELAY)
 
             # Extract security-relevant snippets
             snippets = code_extractor.extract_security_snippets(full_content, path)

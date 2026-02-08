@@ -31,7 +31,7 @@ def main():
     )
 
     # Validate env vars
-    required = ["SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD"]
+    required = ["SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD", "GEMINI_API_KEY"]
     missing = [v for v in required if v not in os.environ]
     if missing:
         print(f"Missing environment variables: {', '.join(missing)}")

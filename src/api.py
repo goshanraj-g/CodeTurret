@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +12,11 @@ from pydantic import BaseModel
 # Add src to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from bouncer_logic import config, scanner
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from bouncer_logic import config, scanner, repo_chat
 
 # Initialize Logging
 logging.basicConfig(level=logging.INFO)
@@ -36,10 +40,9 @@ class ScanRequest(BaseModel):
     deep_scan: bool = False
     repo_name: Optional[str] = None
 
-class RepoConfig(BaseModel):
-    repo_id: int
+class AskRequest(BaseModel):
     repo_name: str
-    repo_url: str
+    question: str
 
 # -- Dependency --
 def get_snowflake_conn():
@@ -54,21 +57,24 @@ def health_check():
 @app.post("/scan")
 def trigger_scan(request: ScanRequest):
     """Trigger a security scan."""
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY environment variable not set"
+        )
+
     try:
-        logger.info(f"Starting scan for {request.repo_url} (Deep: {request.deep_scan})")
-        
-        # Run the existing scanner logic
-        # Note: This is synchronous and blocking. For a real prod app, 
-        # this should be offloaded to a background task (Celery/RQ).
+        logger.info("Starting scan for %s (Deep: %s)", request.repo_url, request.deep_scan)
+
         result = scanner.run_security_scan(
             repo_url=request.repo_url,
             repo_name=request.repo_name,
             deep_scan=request.deep_scan
         )
-        
+
         return result
     except Exception as e:
-        logger.error(f"Scan failed: {e}")
+        logger.error("Scan failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/repos")
@@ -78,7 +84,7 @@ def list_repos():
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT REPO_ID, REPO_NAME, REPO_URL FROM CODEBOUNCER.CORE.REPOSITORY_CONFIG WHERE IS_ACTIVE = TRUE"
+            "SELECT REPO_ID, REPO_NAME, REPO_URL FROM CODEBOUNCER.CORE.REPOSITORY_CONFIG"
         )
         repos = []
         for row in cur.fetchall():
@@ -94,18 +100,18 @@ def list_repos():
 @app.get("/scans")
 def list_recent_scans(limit: int = 10):
     """List recent scan history."""
+    limit = min(max(limit, 1), 100)
+
     conn = get_snowflake_conn()
     try:
         cur = conn.cursor()
-        # Join with Repo Config to get names
         cur.execute(
-            f"""
-            SELECT S.SCAN_ID, S.STATUS, S.STARTED_AT, S.FINDINGS_COUNT, R.REPO_NAME
-            FROM CODEBOUNCER.CORE.SCAN_HISTORY S
-            JOIN CODEBOUNCER.CORE.REPOSITORY_CONFIG R ON S.REPO_ID = R.REPO_ID
-            ORDER BY S.STARTED_AT DESC
-            LIMIT {limit}
-            """
+            """SELECT S.SCAN_ID, S.STATUS, S.STARTED_AT, S.FINDINGS_COUNT, R.REPO_NAME
+               FROM CODEBOUNCER.CORE.SCAN_HISTORY S
+               JOIN CODEBOUNCER.CORE.REPOSITORY_CONFIG R ON S.REPO_ID = R.REPO_ID
+               ORDER BY S.STARTED_AT DESC
+               LIMIT %s""",
+            (limit,),
         )
         scans = []
         columns = [desc[0].lower() for desc in cur.description]
@@ -122,17 +128,37 @@ def get_scan_findings(scan_id: str):
     try:
         cur = conn.cursor()
         cur.execute(
-            """
-            SELECT *
-            FROM CODEBOUNCER.CORE.SCAN_RESULTS
-            WHERE SCAN_ID = %s
-            """,
-            (scan_id,)
+            """SELECT FINDING_ID, SCAN_ID, FILE_PATH, LINE_NUMBER,
+                      SEVERITY, VULN_TYPE, DESCRIPTION, FIX_SUGGESTION,
+                      CODE_SNIPPET, MODEL_USED, CONFIDENCE
+               FROM CODEBOUNCER.CORE.SCAN_RESULTS
+               WHERE SCAN_ID = %s
+               ORDER BY
+                 CASE SEVERITY
+                   WHEN 'CRITICAL' THEN 1
+                   WHEN 'HIGH' THEN 2
+                   WHEN 'MEDIUM' THEN 3
+                   ELSE 4
+                 END,
+                 CONFIDENCE DESC""",
+            (scan_id,),
         )
         findings = []
         columns = [desc[0].lower() for desc in cur.description]
         for row in cur.fetchall():
             findings.append(dict(zip(columns, row)))
         return findings
+    finally:
+        conn.close()
+
+@app.post("/ask")
+def ask_about_repo(request: AskRequest):
+    """Ask a natural language question about a repo's scan results."""
+    conn = get_snowflake_conn()
+    try:
+        answer = repo_chat.ask_about_repo(conn, request.repo_name, request.question)
+        return {"answer": answer}
+    except repo_chat.RepoChatError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()

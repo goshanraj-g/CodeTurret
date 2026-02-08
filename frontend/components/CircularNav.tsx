@@ -6,6 +6,7 @@ import {
     ShieldAlert,
     LayoutDashboard,
     Terminal,
+    MessageSquare,
     Settings,
     Menu,
     X
@@ -18,6 +19,7 @@ const items = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/" },
     { icon: ShieldAlert, label: "Scanner", href: "/scan" },
     { icon: Terminal, label: "Findings", href: "/findings" },
+    { icon: MessageSquare, label: "Ask Cortex", href: "/ask" },
     { icon: Settings, label: "Config", href: "/config" },
 ];
 
