@@ -1,11 +1,24 @@
-"""CodeBouncer Security Dashboard — Streamlit in Snowflake."""
+"""CodeBouncer Security Dashboard — Local Streamlit app."""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
-from snowflake.snowpark.context import get_active_session
-from snowflake.snowpark.functions import col
+import pandas as pd
 import altair as alt
+from dotenv import load_dotenv
 
-session = get_active_session()
+load_dotenv()
+
+from bouncer_logic import config
+
+@st.cache_resource
+def get_connection():
+    return config.get_snowflake_connection()
+
+conn = get_connection()
 
 st.set_page_config(page_title="CodeBouncer", layout="wide")
 
@@ -27,15 +40,24 @@ SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 SEVERITY_COLORS = ["#cf3838", "#e07930", "#c9a825", "#2d8a4e"]
 SEVERITY_ICONS = {"CRITICAL": "\u25cf", "HIGH": "\u25cf", "MEDIUM": "\u25cf", "LOW": "\u25cf"}
 
+
+def run_query(sql, params=None):
+    """Execute a query and return a pandas DataFrame."""
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, params or ())
+        columns = [desc[0] for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=columns)
+    finally:
+        cur.close()
+
+
 # -- Sidebar ------------------------------------------------------------------
 st.sidebar.title("CodeBouncer")
 st.sidebar.caption("Security Audit Dashboard")
 
-repos_df = (
-    session.table("CODEBOUNCER.CORE.REPOSITORY_CONFIG")
-    .filter(col("IS_ACTIVE") == True)
-    .select("REPO_NAME")
-    .to_pandas()
+repos_df = run_query(
+    "SELECT REPO_NAME FROM CODEBOUNCER.CORE.REPOSITORY_CONFIG WHERE IS_ACTIVE = TRUE"
 )
 repo_names = repos_df["REPO_NAME"].tolist() if not repos_df.empty else []
 selected_repo = st.sidebar.selectbox(
@@ -43,21 +65,21 @@ selected_repo = st.sidebar.selectbox(
     repo_names if repo_names else ["No repos configured"],
 )
 
-scans_df = (
-    session.table("CODEBOUNCER.CORE.SCAN_HISTORY")
-    .filter(col("STATUS") == "COMPLETED")
-    .sort(col("STARTED_AT").desc())
-    .limit(20)
-    .select("SCAN_ID", "COMMIT_HASH", "STARTED_AT", "FINDINGS_COUNT")
-    .to_pandas()
+scans_df = run_query(
+    """SELECT SCAN_ID, COMMIT_HASH, STARTED_AT, FINDINGS_COUNT
+       FROM CODEBOUNCER.CORE.SCAN_HISTORY
+       WHERE STATUS = 'COMPLETED'
+       ORDER BY STARTED_AT DESC
+       LIMIT 20"""
 )
 
 selected_scan = None
 if not scans_df.empty:
-    scan_labels = {
-        f"{row['COMMIT_HASH'][:7]} — {row['STARTED_AT']}": row["SCAN_ID"]
-        for _, row in scans_df.iterrows()
-    }
+    scan_labels = {}
+    for _, row in scans_df.iterrows():
+        commit = str(row["COMMIT_HASH"] or "")[:7] or "full"
+        label = f"{commit} \u2014 {row['STARTED_AT']}"
+        scan_labels[label] = row["SCAN_ID"]
     selected_label = st.sidebar.selectbox("Scan", list(scan_labels.keys()))
     selected_scan = scan_labels[selected_label]
 else:
@@ -74,25 +96,25 @@ st.title("Security Findings")
 
 if not selected_scan:
     st.info(
-        "No scan selected. Configure a repository in "
-        "`REPOSITORY_CONFIG` then run `CALL RUN_SECURITY_SCAN();`."
+        "No scan selected. Run a scan first:\n\n"
+        "```\npython src/scan.py https://github.com/user/repo\n```"
     )
     st.stop()
 
 # Metrics
-results_table = session.table("CODEBOUNCER.CORE.SCAN_RESULTS").filter(
-    col("SCAN_ID") == selected_scan
+metrics_df = run_query(
+    "SELECT * FROM CODEBOUNCER.CORE.SCAN_RESULTS WHERE SCAN_ID = %s",
+    (selected_scan,),
 )
-metrics_df = results_table.to_pandas()
 total = len(metrics_df)
 counts = {s: int((metrics_df["SEVERITY"] == s).sum()) for s in SEVERITY_ORDER}
 
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Total", total)
-col2.metric("Critical", counts["CRITICAL"])
-col3.metric("High", counts["HIGH"])
-col4.metric("Medium", counts["MEDIUM"])
-col5.metric("Low", counts["LOW"])
+col2.metric("Critical", counts.get("CRITICAL", 0))
+col3.metric("High", counts.get("HIGH", 0))
+col4.metric("Medium", counts.get("MEDIUM", 0))
+col5.metric("Low", counts.get("LOW", 0))
 
 st.divider()
 
@@ -100,10 +122,9 @@ st.divider()
 st.subheader("File Risk Heatmap")
 
 heatmap_df = (
-    results_table.group_by("FILE_PATH", "SEVERITY")
-    .count()
-    .to_pandas()
-    .rename(columns={"COUNT": "FINDING_COUNT"})
+    metrics_df.groupby(["FILE_PATH", "SEVERITY"])
+    .size()
+    .reset_index(name="FINDING_COUNT")
 )
 
 if heatmap_df.empty:
@@ -111,7 +132,7 @@ if heatmap_df.empty:
     st.stop()
 
 heatmap_df["SHORT_PATH"] = heatmap_df["FILE_PATH"].apply(
-    lambda p: "/".join(p.rsplit("/", 3)[-3:])
+    lambda p: "/".join(str(p).rsplit("/", 3)[-3:])
 )
 
 heatmap = (
@@ -136,13 +157,10 @@ st.divider()
 # -- Findings detail ----------------------------------------------------------
 st.subheader("Findings")
 
-filtered = (
-    results_table.filter(col("SEVERITY").isin(severity_filter))
-    .sort(
-        col("SEVERITY").asc()  # CRITICAL sorts first alphabetically
-    )
-    .to_pandas()
-)
+if severity_filter:
+    filtered = metrics_df[metrics_df["SEVERITY"].isin(severity_filter)].copy()
+else:
+    filtered = metrics_df.copy()
 
 if filtered.empty:
     st.info("No findings match the selected severity filter.")
@@ -153,7 +171,7 @@ for _, row in filtered.iterrows():
     color = dict(zip(SEVERITY_ORDER, SEVERITY_COLORS)).get(sev, "#888")
     label = (
         f":{color}[{SEVERITY_ICONS.get(sev, '')}] **{sev}** | "
-        f"{row['VULN_TYPE']} — `{row['FILE_PATH']}"
+        f"{row['VULN_TYPE']} \u2014 `{row['FILE_PATH']}"
         f":{row['LINE_NUMBER'] or '?'}`"
     )
     with st.expander(label):

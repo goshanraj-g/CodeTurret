@@ -10,34 +10,25 @@ import pytest
 # Ensure the src directory is on the path so bouncer_logic can be imported
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-# Stub out the snowflake SDK so tests run without it installed
+# Stub out snowflake.connector so tests run without it installed
 _sf = ModuleType("snowflake")
-_sf_snowpark = ModuleType("snowflake.snowpark")
-_sf_snowpark.Session = MagicMock
-_sf_snowpark_context = ModuleType("snowflake.snowpark.context")
-_sf_snowpark_context.get_active_session = MagicMock
-_sf_snowpark_functions = ModuleType("snowflake.snowpark.functions")
-_sf_snowpark_functions.col = MagicMock
-_sf_snowpark_functions.lit = MagicMock
-_sf_snowpark_functions.current_timestamp = MagicMock
-_sf_ml = ModuleType("snowflake.ml")
-_sf_ml_python = ModuleType("snowflake.ml.python")
+_sf_connector = ModuleType("snowflake.connector")
+_sf_connector.connect = MagicMock()
 
 sys.modules.setdefault("snowflake", _sf)
-sys.modules.setdefault("snowflake.snowpark", _sf_snowpark)
-sys.modules.setdefault("snowflake.snowpark.context", _sf_snowpark_context)
-sys.modules.setdefault("snowflake.snowpark.functions", _sf_snowpark_functions)
-sys.modules.setdefault("snowflake.ml", _sf_ml)
-sys.modules.setdefault("snowflake.ml.python", _sf_ml_python)
+sys.modules.setdefault("snowflake.connector", _sf_connector)
 
 
 @pytest.fixture
-def mock_session():
-    """A mocked Snowpark Session."""
-    session = MagicMock()
-    session.sql.return_value.collect.return_value = []
-    session.create_dataframe.return_value.write.mode.return_value.save_as_table = MagicMock()
-    return session
+def mock_conn():
+    """A mocked snowflake.connector connection."""
+    conn = MagicMock()
+    cursor = MagicMock()
+    cursor.description = [("RESPONSE",)]
+    cursor.fetchall.return_value = []
+    cursor.fetchone.return_value = None
+    conn.cursor.return_value = cursor
+    return conn
 
 
 @pytest.fixture

@@ -1,143 +1,225 @@
-"""Main scan orchestrator. Entry point for the RUN_SECURITY_SCAN stored procedure."""
+"""Main scan orchestrator. Clones a repo locally, scans with Cortex AI."""
 
+import logging
 import uuid
 from typing import Optional
 
-from snowflake.snowpark import Session
+from bouncer_logic import (
+    code_extractor,
+    config,
+    cortex_client,
+    git_intel,
+    github_client,
+    result_formatter,
+    risk_assessor,
+)
 
-from bouncer_logic import config, cortex_client, file_reader, result_formatter
+logger = logging.getLogger(__name__)
 
 
 def run_security_scan(
-    session: Session,
+    repo_url: str,
     repo_name: Optional[str] = None,
-    scan_type: str = "INCREMENTAL",
+    deep_scan: bool = False,
 ) -> dict:
-    """Scan repositories for security vulnerabilities.
+    """Scan a GitHub repository for security vulnerabilities.
 
-    This is the handler called by the ``RUN_SECURITY_SCAN`` stored procedure.
-
-    Algorithm
-    ---------
-    1. Load active repo configs.
-    2. For each repo:
-       a. Create a SCAN_HISTORY record (RUNNING).
-       b. List files to scan.
-       c. Two-pass scan per file (flash triage → optional pro deep analysis).
-       d. Persist findings and update history.
-    3. Return summary dict.
+    1. Clone repo with git history.
+    2. Gather git intelligence (hot files, security commits, repo context).
+    3. Walk files, score risk with git signals, cap at MAX_SCAN_FILES.
+    4. Extract security-relevant snippets instead of full files.
+    5. Two-pass Cortex scan with enriched prompts.
+    6. Persist findings to Snowflake.
+    7. Cleanup cloned repo.
     """
+    repo_name = repo_name or repo_url.rstrip("/").split("/")[-1]
+    conn = config.get_snowflake_connection()
+
     summary = {
-        "repos_scanned": 0,
+        "repo": repo_name,
         "total_files": 0,
         "total_findings": 0,
+        "skipped_files": 0,
         "errors": [],
     }
 
-    repos = _get_repo_configs(session, repo_name)
+    scan_id = str(uuid.uuid4())
+    repo_dir = None
 
-    for repo in repos:
-        scan_id = str(uuid.uuid4())
-        try:
-            _create_scan_record(session, scan_id, repo)
+    try:
+        # Get or create repo config in Snowflake
+        repo_id = _ensure_repo_config(conn, repo_name, repo_url)
 
-            git_stage = (
-                f"@CODEBOUNCER.INTEGRATIONS.{repo['GIT_REPO_NAME']}"
+        # Create scan record
+        _create_scan_record(conn, scan_id, repo_id)
+
+        # Clone repo with history for git intel
+        logger.info("Cloning %s ...", repo_url)
+        repo_dir = github_client.clone_repo(
+            repo_url, depth=config.GIT_CLONE_DEPTH
+        )
+
+        # Gather git intelligence
+        logger.info("Analyzing git history ...")
+        hot_files = git_intel.get_hot_files(repo_dir, config.GIT_MAX_COMMITS)
+        security_files = git_intel.get_security_commits(repo_dir, config.GIT_MAX_COMMITS)
+        repo_context = git_intel.get_repo_context(repo_dir)
+
+        # List and read files
+        raw_files = github_client.list_repo_files(repo_dir)
+        contents: dict[str, str] = {}
+        for file_info in raw_files:
+            content = github_client.read_file_content(file_info["full_path"])
+            contents[file_info["path"]] = content
+
+        # Git-boosted risk scoring, prioritization, and file cap
+        files = risk_assessor.prioritize_files(
+            raw_files, contents,
+            hot_files=hot_files,
+            security_files=security_files,
+            max_files=config.MAX_SCAN_FILES,
+        )
+        summary["skipped_files"] = len(raw_files) - len(files)
+
+        logger.info(
+            "Scanning %d files (skipped %d) ...",
+            len(files), summary["skipped_files"],
+        )
+
+        all_findings: list[dict] = []
+
+        for file_info in files:
+            path = file_info["path"]
+            full_content = contents[path]
+
+            # Extract security-relevant snippets
+            snippets = code_extractor.extract_security_snippets(full_content, path)
+            focused_content = code_extractor.build_focused_content(snippets, path)
+
+            # Use focused content if snippets found, otherwise full content
+            scan_content = focused_content if focused_content else full_content
+
+            # Build git context for this file
+            git_context = _build_git_context(path, hot_files, security_files)
+
+            # Pass 1 — flash triage with enriched prompt
+            triage_result = cortex_client.triage_with_flash(
+                conn, scan_content, path,
+                repo_context=repo_context,
+                git_context=git_context,
             )
-            extensions = set(
-                repo.get("FILE_EXTENSIONS", config.SCANNABLE_EXTENSIONS)
+            findings_for_file = triage_result.get("findings", [])
+            model_used = config.MODEL_FLASH
+
+            # Pass 2 — pro deep analysis when warranted
+            needs_deep = deep_scan or any(
+                f.get("confidence", 1.0) < config.DEEP_SCAN_THRESHOLD
+                or f.get("severity") in ("CRITICAL", "HIGH")
+                for f in findings_for_file
             )
-            files = file_reader.list_files_in_repo(
-                session, git_stage, repo["DEFAULT_BRANCH"], extensions
-            )
 
-            all_findings: list[dict] = []
-
-            for file_info in files:
-                content = file_reader.read_file_content(
-                    session, file_info["full_stage_path"]
+            if needs_deep and findings_for_file:
+                deep_result = cortex_client.deep_analyze_with_pro(
+                    conn, scan_content, path, findings_for_file,
+                    repo_context=repo_context,
+                    git_context=git_context,
                 )
-                if len(content) > config.MAX_FILE_SIZE:
-                    content = content[: config.MAX_FILE_SIZE]
-
-                # Pass 1 — flash triage
-                triage_result = cortex_client.triage_with_flash(
-                    session, content, file_info["path"]
-                )
-                findings_for_file = triage_result.get("findings", [])
-                model_used = config.MODEL_FLASH
-
-                # Pass 2 — pro deep analysis when warranted
-                needs_deep = repo.get("DEEP_SCAN", False) or any(
-                    f.get("confidence", 1.0) < config.DEEP_SCAN_THRESHOLD
-                    or f.get("severity") in ("CRITICAL", "HIGH")
-                    for f in findings_for_file
-                )
-
-                if needs_deep and findings_for_file:
-                    deep_result = cortex_client.deep_analyze_with_pro(
-                        session, content, file_info["path"], findings_for_file
-                    )
+                if deep_result is not None:
                     findings_for_file = deep_result.get("findings", [])
                     model_used = config.MODEL_PRO
-
-                for raw in findings_for_file:
-                    formatted = result_formatter.format_finding(
-                        scan_id,
-                        repo["REPO_ID"],
-                        file_info["path"],
-                        raw,
-                        model_used,
-                        triage_result if model_used == config.MODEL_FLASH else deep_result,
+                else:
+                    logger.info(
+                        "Keeping flash results for %s (pro unavailable)", path
                     )
-                    all_findings.append(formatted)
 
-            count = result_formatter.persist_findings(session, all_findings)
+            for raw in findings_for_file:
+                formatted = result_formatter.format_finding(
+                    scan_id,
+                    repo_id,
+                    path,
+                    raw,
+                    model_used,
+                    triage_result if model_used == config.MODEL_FLASH else deep_result,
+                )
+                all_findings.append(formatted)
 
-            result_formatter.update_scan_status(
-                session,
-                scan_id,
-                "COMPLETED",
-                files_scanned=len(files),
-                findings_count=count,
-            )
-            summary["repos_scanned"] += 1
-            summary["total_files"] += len(files)
-            summary["total_findings"] += count
+        count = result_formatter.persist_findings(conn, all_findings)
 
-        except Exception as exc:
-            result_formatter.update_scan_status(
-                session, scan_id, "FAILED", error_message=str(exc)
-            )
-            summary["errors"].append(
-                {"repo": repo.get("REPO_NAME", "unknown"), "error": str(exc)}
-            )
+        result_formatter.update_scan_status(
+            conn, scan_id, "COMPLETED",
+            files_scanned=len(files),
+            findings_count=count,
+        )
+        summary["total_files"] = len(files)
+        summary["total_findings"] = count
+
+    except Exception as exc:
+        logger.exception("Scan failed for %s", repo_url)
+        result_formatter.update_scan_status(
+            conn, scan_id, "FAILED", error_message=str(exc)
+        )
+        summary["errors"].append({"repo": repo_name, "error": str(exc)})
+
+    finally:
+        if repo_dir:
+            github_client.cleanup_repo(repo_dir)
+        conn.close()
 
     return summary
 
 
 # -- helpers -----------------------------------------------------------------
 
-def _get_repo_configs(session: Session, repo_name: Optional[str]) -> list:
-    """Fetch active repository configurations."""
-    if repo_name:
-        rows = session.sql(
-            "SELECT * FROM CODEBOUNCER.CORE.REPOSITORY_CONFIG "
-            "WHERE REPO_NAME = ? AND IS_ACTIVE = TRUE",
-            params=[repo_name],
-        ).collect()
-    else:
-        rows = session.sql(
-            "SELECT * FROM CODEBOUNCER.CORE.REPOSITORY_CONFIG WHERE IS_ACTIVE = TRUE"
-        ).collect()
-    return [row.as_dict() for row in rows]
+def _build_git_context(
+    path: str,
+    hot_files: dict[str, int],
+    security_files: dict[str, list[str]],
+) -> str:
+    """Build a human-readable git context string for a file."""
+    parts: list[str] = []
+    change_count = hot_files.get(path, 0)
+    if change_count:
+        parts.append(f"Modified {change_count} times in recent history")
+    sec_commits = security_files.get(path, [])
+    if sec_commits:
+        msgs = sec_commits[:3]
+        parts.append(f"Security-related commits: {'; '.join(msgs)}")
+    return ". ".join(parts)
 
 
-def _create_scan_record(session: Session, scan_id: str, repo: dict) -> None:
+def _ensure_repo_config(conn, repo_name: str, repo_url: str) -> int:
+    """Get existing repo ID or create a new config row. Returns REPO_ID."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT REPO_ID FROM CODEBOUNCER.CORE.REPOSITORY_CONFIG WHERE REPO_NAME = %s",
+            (repo_name,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        cur.execute(
+            """INSERT INTO CODEBOUNCER.CORE.REPOSITORY_CONFIG
+               (REPO_NAME, REPO_URL, GIT_REPO_NAME, DEFAULT_BRANCH)
+               VALUES (%s, %s, %s, 'main')""",
+            (repo_name, repo_url, repo_name),
+        )
+        cur.execute("SELECT MAX(REPO_ID) FROM CODEBOUNCER.CORE.REPOSITORY_CONFIG")
+        return cur.fetchone()[0]
+    finally:
+        cur.close()
+
+
+def _create_scan_record(conn, scan_id: str, repo_id: int) -> None:
     """Insert a new SCAN_HISTORY row."""
-    session.sql(
-        """INSERT INTO CODEBOUNCER.CORE.SCAN_HISTORY
-           (SCAN_ID, REPO_ID, BRANCH, STATUS, SCAN_TYPE, STARTED_AT)
-           VALUES (?, ?, ?, 'RUNNING', 'INCREMENTAL', CURRENT_TIMESTAMP())""",
-        params=[scan_id, repo["REPO_ID"], repo["DEFAULT_BRANCH"]],
-    ).collect()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """INSERT INTO CODEBOUNCER.CORE.SCAN_HISTORY
+               (SCAN_ID, REPO_ID, STATUS, SCAN_TYPE, STARTED_AT)
+               VALUES (%s, %s, 'RUNNING', 'FULL', CURRENT_TIMESTAMP())""",
+            (scan_id, repo_id),
+        )
+    finally:
+        cur.close()

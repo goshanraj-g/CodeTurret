@@ -48,31 +48,50 @@ class TestFormatFinding:
 
 
 class TestPersistFindings:
-    def test_empty_list_returns_zero(self, mock_session):
-        assert result_formatter.persist_findings(mock_session, []) == 0
-        mock_session.create_dataframe.assert_not_called()
+    def test_empty_list_returns_zero(self, mock_conn):
+        assert result_formatter.persist_findings(mock_conn, []) == 0
+        mock_conn.cursor.return_value.executemany.assert_not_called()
 
-    def test_returns_count(self, mock_session):
-        findings = [{"FINDING_ID": "a"}, {"FINDING_ID": "b"}]
-        count = result_formatter.persist_findings(mock_session, findings)
+    def test_returns_count(self, mock_conn):
+        findings = [
+            {
+                "FINDING_ID": "a", "SCAN_ID": "s", "REPO_ID": 1,
+                "FILE_PATH": "f.py", "LINE_NUMBER": 1,
+                "SEVERITY": "HIGH", "VULN_TYPE": "SQLi",
+                "DESCRIPTION": "d", "FIX_SUGGESTION": "",
+                "CODE_SNIPPET": "", "MODEL_USED": "m",
+                "CONFIDENCE": 0.9, "RAW_RESPONSE": "{}",
+            },
+            {
+                "FINDING_ID": "b", "SCAN_ID": "s", "REPO_ID": 1,
+                "FILE_PATH": "g.py", "LINE_NUMBER": 2,
+                "SEVERITY": "LOW", "VULN_TYPE": "Info",
+                "DESCRIPTION": "d", "FIX_SUGGESTION": "",
+                "CODE_SNIPPET": "", "MODEL_USED": "m",
+                "CONFIDENCE": 0.5, "RAW_RESPONSE": "{}",
+            },
+        ]
+        count = result_formatter.persist_findings(mock_conn, findings)
         assert count == 2
-        mock_session.create_dataframe.assert_called_once_with(findings)
+        mock_conn.cursor.return_value.executemany.assert_called_once()
 
 
 class TestUpdateScanStatus:
-    def test_uses_parameterized_sql(self, mock_session):
+    def test_uses_parameterized_sql(self, mock_conn):
         result_formatter.update_scan_status(
-            mock_session, "scan-1", "COMPLETED", 5, 3
+            mock_conn, "scan-1", "COMPLETED", 5, 3
         )
 
-        sql_string = mock_session.sql.call_args[0][0]
-        assert "?" in sql_string
+        cursor = mock_conn.cursor.return_value
+        sql_string = cursor.execute.call_args[0][0]
+        assert "%s" in sql_string
         assert "{" not in sql_string
 
-    def test_includes_error_message(self, mock_session):
+    def test_includes_error_message(self, mock_conn):
         result_formatter.update_scan_status(
-            mock_session, "scan-1", "FAILED", error_message="boom"
+            mock_conn, "scan-1", "FAILED", error_message="boom"
         )
 
-        params = mock_session.sql.call_args.kwargs.get("params", [])
+        cursor = mock_conn.cursor.return_value
+        params = cursor.execute.call_args[0][1]
         assert "boom" in params

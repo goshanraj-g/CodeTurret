@@ -4,8 +4,6 @@ import json
 import uuid
 from typing import List
 
-from snowflake.snowpark import Session
-
 from bouncer_logic import config
 
 
@@ -35,18 +33,37 @@ def format_finding(
     }
 
 
-def persist_findings(session: Session, findings: List[dict]) -> int:
+def persist_findings(conn, findings: List[dict]) -> int:
     """Insert findings into SCAN_RESULTS. Returns inserted row count."""
     if not findings:
         return 0
 
-    df = session.create_dataframe(findings)
-    df.write.mode("append").save_as_table(config.TABLE_SCAN_RESULTS)
-    return len(findings)
+    cur = conn.cursor()
+    try:
+        cur.executemany(
+            f"""INSERT INTO {config.TABLE_SCAN_RESULTS}
+                (FINDING_ID, SCAN_ID, REPO_ID, FILE_PATH, LINE_NUMBER,
+                 SEVERITY, VULN_TYPE, DESCRIPTION, FIX_SUGGESTION,
+                 CODE_SNIPPET, MODEL_USED, CONFIDENCE, RAW_RESPONSE)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, PARSE_JSON(%s))""",
+            [
+                (
+                    f["FINDING_ID"], f["SCAN_ID"], f["REPO_ID"],
+                    f["FILE_PATH"], f["LINE_NUMBER"],
+                    f["SEVERITY"], f["VULN_TYPE"], f["DESCRIPTION"],
+                    f["FIX_SUGGESTION"], f["CODE_SNIPPET"],
+                    f["MODEL_USED"], f["CONFIDENCE"], f["RAW_RESPONSE"],
+                )
+                for f in findings
+            ],
+        )
+        return len(findings)
+    finally:
+        cur.close()
 
 
 def update_scan_status(
-    session: Session,
+    conn,
     scan_id: str,
     status: str,
     files_scanned: int = 0,
@@ -54,19 +71,23 @@ def update_scan_status(
     error_message: str = None,
 ) -> None:
     """Update a SCAN_HISTORY row with parameterized SQL."""
-    if error_message:
-        session.sql(
-            """UPDATE CODEBOUNCER.CORE.SCAN_HISTORY
-               SET STATUS = ?, FILES_SCANNED = ?, FINDINGS_COUNT = ?,
-                   COMPLETED_AT = CURRENT_TIMESTAMP(), ERROR_MESSAGE = ?
-               WHERE SCAN_ID = ?""",
-            params=[status, files_scanned, findings_count, error_message, scan_id],
-        ).collect()
-    else:
-        session.sql(
-            """UPDATE CODEBOUNCER.CORE.SCAN_HISTORY
-               SET STATUS = ?, FILES_SCANNED = ?, FINDINGS_COUNT = ?,
-                   COMPLETED_AT = CURRENT_TIMESTAMP()
-               WHERE SCAN_ID = ?""",
-            params=[status, files_scanned, findings_count, scan_id],
-        ).collect()
+    cur = conn.cursor()
+    try:
+        if error_message:
+            cur.execute(
+                """UPDATE CODEBOUNCER.CORE.SCAN_HISTORY
+                   SET STATUS = %s, FILES_SCANNED = %s, FINDINGS_COUNT = %s,
+                       COMPLETED_AT = CURRENT_TIMESTAMP(), ERROR_MESSAGE = %s
+                   WHERE SCAN_ID = %s""",
+                (status, files_scanned, findings_count, error_message, scan_id),
+            )
+        else:
+            cur.execute(
+                """UPDATE CODEBOUNCER.CORE.SCAN_HISTORY
+                   SET STATUS = %s, FILES_SCANNED = %s, FINDINGS_COUNT = %s,
+                       COMPLETED_AT = CURRENT_TIMESTAMP()
+                   WHERE SCAN_ID = %s""",
+                (status, files_scanned, findings_count, scan_id),
+            )
+    finally:
+        cur.close()

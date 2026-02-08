@@ -1,22 +1,25 @@
-# 🛡️ Project: CodeBouncer
-AI-powered security auditor running natively in Snowflake.
+# Project: CodeBouncer
+AI-powered security auditor using Snowflake Cortex AI.
 
-## 🏗️ Architecture
-- **Engine:** Snowflake Cortex AI (Gemini 3.0 Flash/Pro).
-- **Backend:** Snowpark Python (Logic in `src/bouncer_logic/`).
-- **Dashboard:** Streamlit in Snowflake (`src/dashboard.py`).
-- **Data Source:** GitHub via Snowflake Native Git Integration.
+## Architecture
+- **Engine:** Snowflake Cortex AI (llama3.1-8b / claude-3-5-sonnet) called remotely via `snowflake-connector-python`.
+- **Backend:** Local Python CLI (`src/scan.py`) + logic in `src/bouncer_logic/`.
+- **Dashboard:** Local Streamlit app (`src/dashboard.py`) reading from Snowflake tables.
+- **Data Source:** GitHub repos cloned locally via `git clone --depth 50` (with git history for intel).
+- **Smart Scanner:** Git intel + AST/regex code extraction + enriched prompts.
 
-## 🛠️ Development Workflow
-- **Standard:** Use `gemini-3.0-flash` for high-speed metadata and summaries.
-- **Deep Audit:** Trigger `gemini-3.0-pro` for vulnerability logic reasoning.
+## Development Workflow
+- **Standard:** Use `llama3.1-8b` for high-speed triage.
+- **Deep Audit:** Trigger `claude-3-5-sonnet` for high-severity/low-confidence findings.
 - **Verification:** Always run `pytest` after changing bouncer logic.
 
-## 📋 Commands
-- **Sync GitHub:** `ALTER GIT REPOSITORY GITHUB_REPO FETCH;`
-- **Deploy App:** `snow streamlit deploy`
-- **Manual Scan:** `CALL RUN_SECURITY_SCAN();`
+## Commands
+- **Scan a repo:** `python src/scan.py https://github.com/user/repo`
+- **Deep scan:** `python src/scan.py https://github.com/user/repo --deep`
+- **Dashboard:** `streamlit run src/dashboard.py`
+- **Run tests:** `pytest tests/ -v`
 
-## ⚠️ Standards
-- Use **parameterized queries** in Snowpark (No f-strings in SQL!).
-- Security results MUST be JSON-formatted for the Streamlit heatmap.
+## Standards
+- Use **parameterized queries** (`%s` placeholders) — no f-strings in SQL.
+- Security results stored as JSON in Snowflake for the Streamlit heatmap.
+- Credentials in `.env` file (see `.env.example`).
