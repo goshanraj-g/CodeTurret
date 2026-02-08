@@ -18,6 +18,15 @@ _sf_connector.connect = MagicMock()
 sys.modules.setdefault("snowflake", _sf)
 sys.modules.setdefault("snowflake.connector", _sf_connector)
 
+# Stub out google.generativeai so tests run without it installed
+_google = ModuleType("google")
+_google_genai = ModuleType("google.generativeai")
+_google_genai.configure = MagicMock()
+_google_genai.GenerativeModel = MagicMock()
+
+sys.modules.setdefault("google", _google)
+sys.modules.setdefault("google.generativeai", _google_genai)
+
 
 @pytest.fixture
 def mock_conn():

@@ -1,4 +1,8 @@
-"""Main scan orchestrator. Clones a repo locally, scans with Cortex AI."""
+"""Main scan orchestrator. Clones a repo locally, scans with Gemini AI.
+
+Scanning: Gemini API (flash triage + pro deep analysis)
+Storage & Analytics: Snowflake (persist findings + Cortex post-scan insights)
+"""
 
 import logging
 import uuid
@@ -8,6 +12,7 @@ from bouncer_logic import (
     code_extractor,
     config,
     cortex_client,
+    gemini_client,
     git_intel,
     github_client,
     result_formatter,
@@ -28,9 +33,10 @@ def run_security_scan(
     2. Gather git intelligence (hot files, security commits, repo context).
     3. Walk files, score risk with git signals, cap at MAX_SCAN_FILES.
     4. Extract security-relevant snippets instead of full files.
-    5. Two-pass Cortex scan with enriched prompts.
+    5. Two-pass Gemini scan with enriched prompts.
     6. Persist findings to Snowflake.
-    7. Cleanup cloned repo.
+    7. Generate post-scan analytics via Snowflake Cortex.
+    8. Cleanup cloned repo.
     """
     repo_name = repo_name or repo_url.rstrip("/").split("/")[-1]
     conn = config.get_snowflake_connection()
@@ -41,6 +47,7 @@ def run_security_scan(
         "total_findings": 0,
         "skipped_files": 0,
         "errors": [],
+        "insights": None,
     }
 
     scan_id = str(uuid.uuid4())
@@ -102,16 +109,16 @@ def run_security_scan(
             # Build git context for this file
             git_context = _build_git_context(path, hot_files, security_files)
 
-            # Pass 1 — flash triage with enriched prompt
-            triage_result = cortex_client.triage_with_flash(
-                conn, scan_content, path,
+            # Pass 1 — Gemini Flash triage
+            triage_result = gemini_client.triage_with_flash(
+                scan_content, path,
                 repo_context=repo_context,
                 git_context=git_context,
             )
             findings_for_file = triage_result.get("findings", [])
             model_used = config.MODEL_FLASH
 
-            # Pass 2 — pro deep analysis when warranted
+            # Pass 2 — Gemini Pro deep analysis when warranted
             needs_deep = deep_scan or any(
                 f.get("confidence", 1.0) < config.DEEP_SCAN_THRESHOLD
                 or f.get("severity") in ("CRITICAL", "HIGH")
@@ -119,8 +126,8 @@ def run_security_scan(
             )
 
             if needs_deep and findings_for_file:
-                deep_result = cortex_client.deep_analyze_with_pro(
-                    conn, scan_content, path, findings_for_file,
+                deep_result = gemini_client.deep_analyze_with_pro(
+                    scan_content, path, findings_for_file,
                     repo_context=repo_context,
                     git_context=git_context,
                 )
@@ -152,6 +159,15 @@ def run_security_scan(
         )
         summary["total_files"] = len(files)
         summary["total_findings"] = count
+
+        # Post-scan: generate Cortex analytics insights
+        if count > 0:
+            try:
+                insights = cortex_client.get_scan_insights(conn, scan_id)
+                summary["insights"] = insights
+                logger.info("Cortex insights generated for scan %s", scan_id)
+            except Exception as exc:
+                logger.warning("Cortex insights failed (non-fatal): %s", exc)
 
     except Exception as exc:
         logger.exception("Scan failed for %s", repo_url)
