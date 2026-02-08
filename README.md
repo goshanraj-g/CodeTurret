@@ -1,4 +1,4 @@
-# CodeBouncer
+# CodeTurret
 
 **AI-Powered Security Auditor** — Autonomous vulnerability detection and remediation for your codebase.
 
