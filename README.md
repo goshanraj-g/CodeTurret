@@ -1,20 +1,16 @@
 # CodeTurret
 
-**AI-Powered Security Auditor** — Autonomous vulnerability detection and remediation for your codebase.
-
-![Made with Gemini](https://img.shields.io/badge/AI-Gemini%202.0-blue)
-![Snowflake](https://img.shields.io/badge/Data-Snowflake-29B5E8)
-![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black)
+**AI Agents to turn vibe-coded slop into production-grade code**
 
 ## Features
 
-- 🔍 **Dual-Pass AI Scanning** — Gemini Flash for fast triage, Gemini Pro for deep analysis
-- 🧠 **Git Intelligence** — Prioritizes files based on commit history and security-related changes
-- 💬 **Ask Cortex** — Natural language Q&A about your scan results using Snowflake Cortex
-- 🎯 **Severity Ranking** — Findings sorted by CRITICAL → HIGH → MEDIUM → LOW
+- **dual-pass AI scanning** — Gemini Flash for fast triage, Gemini Pro for deep analysis
+- **git intelligence** — prioritizes files based on commit history and security-related changes
+- **ask cortex** — natural language Q&A about your scan results using Snowflake Cortex
+- **severity ranking** — Findings sorted by CRITICAL → HIGH → MEDIUM → LOW
 - 🖥️ **Modern Dashboard** — Dark-mode UI with real-time scan logs
 
----
+--- README IS BEING REWORKED
 
 ## How Gemini AI Powers the Scanner
 
