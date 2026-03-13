@@ -23,6 +23,7 @@ def get_hot_files(repo_dir: str, max_count: int = 50) -> Dict[str, int]:
         cwd=repo_dir,
         capture_output=True,
         text=True,
+        timeout=30,
     )
     counts: Dict[str, int] = defaultdict(int)
     for line in result.stdout.splitlines():

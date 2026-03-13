@@ -13,12 +13,14 @@ def clone_repo(repo_url: str, target_dir: Optional[str] = None, depth: int = 1) 
     """Clone a repo and return the local directory path."""
     if target_dir is None:
         target_dir = tempfile.mkdtemp(prefix="codebouncer_")
+        os.chmod(target_dir, 0o700)
 
     subprocess.run(
         ["git", "clone", "--depth", str(depth), repo_url, target_dir],
         check=True,
         capture_output=True,
         text=True,
+        timeout=300,
     )
     return target_dir
 
