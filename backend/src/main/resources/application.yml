@@ -45,6 +45,15 @@ git:
   max-scan-files: 25
   max-file-size: 50000
 
+snowflake:
+  account: ${SNOWFLAKE_ACCOUNT:}
+  user: ${SNOWFLAKE_USER:}
+  password: ${SNOWFLAKE_PASSWORD:}
+  warehouse: ${SNOWFLAKE_WAREHOUSE:CODEBOUNCER_WH}
+  database: ${SNOWFLAKE_DATABASE:CODEBOUNCER}
+  schema: ${SNOWFLAKE_SCHEMA:CORE}
+  cortex-model: llama3.1-8b
+
 encryption:
   secret-key: ${ENCRYPTION_SECRET_KEY:dev-key-change-in-production-32b}
 
