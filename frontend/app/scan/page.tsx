@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { TerminalOutput } from "@/components/TerminalOutput";
 import { Play, Sparkles } from "lucide-react";
@@ -13,39 +13,98 @@ interface Log {
     type: "info" | "success" | "warning" | "error";
 }
 
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
 export default function ScanPage() {
-    const [repoUrl, setRepoUrl] = useState("");
+    const [repoUrl, setRepoUrl]     = useState("");
     const [isDeepScan, setIsDeepScan] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
-    const [logs, setLogs] = useState<Log[]>([]);
+    const [logs, setLogs]           = useState<Log[]>([]);
+    const [scanId, setScanId]       = useState<string | null>(null);
+    const esRef                     = useRef<EventSource | null>(null);
+
+    const addLog = (id: string, message: string, type: Log["type"]) =>
+        setLogs(prev => [...prev, { id, timestamp: new Date().toLocaleTimeString(), message, type }]);
 
     const handleScan = async () => {
-        if (!repoUrl) return;
+        if (!repoUrl || isScanning) return;
 
+        // Close any existing stream
+        esRef.current?.close();
+        setLogs([]);
         setIsScanning(true);
-        setLogs([{ id: "init", timestamp: new Date().toLocaleTimeString(), message: "Initializing scan agent...", type: "info" }]);
+        setScanId(null);
+
+        addLog("init", "Queuing scan job...", "info");
 
         try {
-            const res = await fetch("http://localhost:8000/scan", {
+            const res = await fetch(`${API}/api/scans`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ repo_url: repoUrl, deep_scan: isDeepScan }),
+                body: JSON.stringify({ repoUrl, deepScan: isDeepScan }),
             });
 
-            if (!res.ok) throw new Error("Scan failed to start");
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ detail: res.statusText }));
+                throw new Error(err.detail || "Failed to queue scan");
+            }
 
             const data = await res.json();
+            const id: string = data.scanId;
+            setScanId(id);
+            addLog("queued", `Scan queued — ID: ${id}`, "success");
+            addLog("target", `Target: ${repoUrl}`, "info");
 
-            setLogs(prev => [
-                ...prev,
-                { id: "start", timestamp: new Date().toLocaleTimeString(), message: `Target acquired: ${repoUrl}`, type: "success" },
-                { id: "files", timestamp: new Date().toLocaleTimeString(), message: `Analyzed ${data.total_files} files.`, type: "info" },
-                { id: "findings", timestamp: new Date().toLocaleTimeString(), message: `Found ${data.total_findings} vulnerabilities.`, type: data.total_findings > 0 ? "warning" : "success" },
-                { id: "complete", timestamp: new Date().toLocaleTimeString(), message: "Scan complete.", type: "success" },
-            ]);
+            // Open SSE stream
+            const es = new EventSource(`${API}${data.streamUrl}`);
+            esRef.current = es;
+
+            es.addEventListener("SCAN_STATUS", (e) => {
+                const d = JSON.parse(e.data);
+                addLog("status", `Status: ${d.data?.status}`, "info");
+            });
+
+            es.addEventListener("SCAN_STARTED", (e) => {
+                const d = JSON.parse(e.data);
+                addLog("started", `Scanning ${d.data?.totalFiles} files...`, "info");
+            });
+
+            es.addEventListener("FILE_SCANNED", (e) => {
+                const d = JSON.parse(e.data);
+                const f = d.data;
+                const type = f.findings > 0 ? "warning" : "info";
+                addLog(`file-${f.file}`, `${f.file} — ${f.findings > 0 ? `${f.findings} finding(s) [${f.severity}]` : "clean"}`, type);
+            });
+
+            es.addEventListener("FILE_SKIPPED", (e) => {
+                const d = JSON.parse(e.data);
+                addLog(`skip-${d.data?.file}`, `Skipped: ${d.data?.file}`, "info");
+            });
+
+            es.addEventListener("SCAN_COMPLETE", (e) => {
+                const d = JSON.parse(e.data);
+                const count = d.data?.totalFindings ?? 0;
+                addLog("complete", `Scan complete — ${count} vulnerabilit${count === 1 ? "y" : "ies"} found.`, count > 0 ? "warning" : "success");
+                if (count > 0) addLog("nav", `View findings → /findings/${data.scanId}`, "info");
+                setIsScanning(false);
+                es.close();
+            });
+
+            es.addEventListener("SCAN_FAILED", (e) => {
+                const d = JSON.parse(e.data);
+                addLog("failed", `Scan failed: ${d.data?.error}`, "error");
+                setIsScanning(false);
+                es.close();
+            });
+
+            es.onerror = () => {
+                addLog("conn-err", "Stream connection lost.", "error");
+                setIsScanning(false);
+                es.close();
+            };
+
         } catch (err) {
-            setLogs(prev => [...prev, { id: "err", timestamp: new Date().toLocaleTimeString(), message: String(err), type: "error" }]);
-        } finally {
+            addLog("err", String(err), "error");
             setIsScanning(false);
         }
     };
@@ -57,11 +116,9 @@ export default function ScanPage() {
                 <p className="text-muted-foreground">Initiate a deep security audit on any public repository.</p>
             </div>
 
-            {/* Two-column layout: Controls on left, Terminal on right */}
             <div className="grid gap-8 lg:grid-cols-2">
                 {/* Left Column - Controls */}
                 <div className="space-y-6">
-                    {/* Input Card */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -75,6 +132,7 @@ export default function ScanPage() {
                             placeholder="https://github.com/username/repo"
                             value={repoUrl}
                             onChange={(e) => setRepoUrl(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleScan()}
                             className="w-full rounded-xl border border-white/10 bg-black/60 px-4 py-4 font-mono text-sm text-white placeholder-white/30 focus:border-green-500/50 focus:outline-none focus:ring-2 focus:ring-green-500/20 transition-all"
                         />
 
@@ -95,18 +153,17 @@ export default function ScanPage() {
                                 </div>
                                 <div className="text-sm">
                                     <span className="block font-medium text-white">Deep Analysis</span>
-                                    <span className="text-xs text-muted-foreground">Slower, more accurate</span>
+                                    <span className="text-xs text-muted-foreground">Slower, more accurate (Gemini Pro)</span>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Scan Button */}
                         <button
                             onClick={handleScan}
                             disabled={isScanning || !repoUrl}
                             className={cn(
                                 "mt-6 flex w-full items-center justify-center gap-2 rounded-xl py-4 font-semibold text-black transition-all",
-                                isScanning
+                                isScanning || !repoUrl
                                     ? "bg-white/50 cursor-not-allowed"
                                     : "bg-white hover:bg-gray-100 hover:scale-[1.02] active:scale-[0.98]"
                             )}
@@ -114,14 +171,11 @@ export default function ScanPage() {
                             {isScanning ? (
                                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-black border-t-transparent" />
                             ) : (
-                                <>
-                                    <Play className="h-4 w-4" /> Initialize Scan
-                                </>
+                                <><Play className="h-4 w-4" /> Initialize Scan</>
                             )}
                         </button>
                     </motion.div>
 
-                    {/* AI Info Card */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -133,7 +187,8 @@ export default function ScanPage() {
                             <span className="text-sm font-semibold">AI Capabilities</span>
                         </div>
                         <p className="text-sm text-purple-200/70 leading-relaxed">
-                            Scanner uses a <b>hybrid AI architecture</b>. Fast triage identifies hotspots, then deep analysis verifies high-risk findings.
+                            Hybrid AI architecture: <b>Gemini Flash</b> for rapid triage, <b>Gemini Pro</b> for deep analysis on high-risk findings.
+                            Results stream in real-time via SSE.
                         </p>
                     </motion.div>
                 </div>
@@ -147,8 +202,11 @@ export default function ScanPage() {
                 >
                     <div className="mb-3 flex items-center justify-between">
                         <span className="text-sm font-medium text-white">Live Output</span>
-                        <span className="text-xs text-muted-foreground font-mono">
-                            {isScanning ? "● ACTIVE" : "○ IDLE"}
+                        <span className={cn(
+                            "text-xs font-mono",
+                            isScanning ? "text-green-400" : "text-muted-foreground"
+                        )}>
+                            {isScanning ? "● STREAMING" : "○ IDLE"}
                         </span>
                     </div>
                     <TerminalOutput

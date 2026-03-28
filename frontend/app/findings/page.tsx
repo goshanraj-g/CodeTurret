@@ -5,12 +5,14 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { FileText, Calendar, AlertTriangle, CheckCircle, Search } from "lucide-react";
 
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
 interface Scan {
-    scan_id: string;
-    repo_name: string;
-    started_at: string;
+    scanId: string;
+    repoName: string;
+    startedAt: string;
     status: string;
-    findings_count: number;
+    findingsCount: number;
 }
 
 export default function FindingsPage() {
@@ -18,7 +20,7 @@ export default function FindingsPage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch("http://localhost:8000/scans")
+        fetch(`${API}/api/scans`)
             .then((res) => res.json())
             .then((data) => {
                 setScans(data);
@@ -59,7 +61,7 @@ export default function FindingsPage() {
                             transition={{ delay: i * 0.05 }}
                         >
                             <Link
-                                href={`/findings/${scan.scan_id}`}
+                                href={`/findings/${scan.scanId}`}
                                 className="group flex items-center justify-between rounded-xl border border-white/5 bg-white/5 p-4 transition-all hover:bg-white/10 hover:border-white/10"
                             >
                                 <div className="flex items-center gap-4">
@@ -68,11 +70,11 @@ export default function FindingsPage() {
                                     </div>
                                     <div>
                                         <div className="font-mono font-medium text-white group-hover:text-blue-400 transition-colors">
-                                            {scan.repo_name}
+                                            {scan.repoName}
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                             <Calendar className="h-3 w-3" />
-                                            {new Date(scan.started_at).toLocaleString()}
+                                            {scan.startedAt ? new Date(scan.startedAt).toLocaleString() : "—"}
                                         </div>
                                     </div>
                                 </div>
@@ -80,8 +82,8 @@ export default function FindingsPage() {
                                 <div className="flex items-center gap-6">
                                     <div className="text-right">
                                         <div className="text-xs text-muted-foreground">Findings</div>
-                                        <div className={`font-mono font-bold ${scan.findings_count > 0 ? "text-red-400" : "text-green-400"}`}>
-                                            {scan.findings_count}
+                                        <div className={`font-mono font-bold ${scan.findingsCount > 0 ? "text-red-400" : "text-green-400"}`}>
+                                            {scan.findingsCount}
                                         </div>
                                     </div>
                                     <div className="text-right">
