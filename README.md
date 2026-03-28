@@ -8,12 +8,12 @@ CodeTurret is an automated security architect designed for the era of vibe-codin
 
 ## Key Features
 
-- **Dual-Pass AI Scanning** — Gemini Flash for rapid triage across all files, Gemini Pro for deep analysis on high-severity findings
-- **Real-Time Streaming** — scan progress streams file-by-file via Server-Sent Events; no waiting for a blocking response
-- **Auto-Fix PRs** — after a scan, one click generates AI patches for every vulnerability and opens a GitHub Pull Request
-- **Git Intelligence** — git blame, hot-file detection, and security commit analysis enrich every finding with authorship context
-- **Ask Cortex** — natural-language security consultant powered by Snowflake Cortex AI; ask "who introduced the SQL injection?" and get an answer
-- **Async Job Queue** — scans are processed via RabbitMQ workers; the API returns instantly and the UI streams progress
+- **Dual-Pass AI Scanning** -> Gemini Flash for rapid triage across all files, Gemini Pro for deep analysis on high-severity findings
+- **Real-Time Streaming** -> scan progress streams file-by-file via Server-Sent Events; no waiting for a blocking response
+- **Auto-Fix PRs** -> after a scan, one click generates AI patches for every vulnerability and opens a GitHub Pull Request
+- **Git Intelligence** -> git blame, hot-file detection, and security commit analysis enrich every finding with authorship context
+- **Ask Cortex** -> natural-language security consultant powered by Snowflake Cortex AI; ask "who introduced the SQL injection?" and get an answer
+- **Async Job Queue** -> scans are processed via RabbitMQ workers; the API returns instantly and the UI streams progress
 
 ---
 
